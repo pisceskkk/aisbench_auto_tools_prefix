@@ -112,6 +112,7 @@ def save_result(request_rate, npu_num):
     save_csv(ans, filename)
 
 def modify_aisbench_api(concurrency, output_len, model_name=None):
+    """Generate runtime API config file, using model_name or MODEL_NAME by default."""
     if model_name is None:
         model_name = MODEL_NAME
     file_default = open("default_api.py", 'r+')
@@ -222,7 +223,7 @@ def query_available_models(ip_address, port):
     no_proxy_opener = request.build_opener(request.ProxyHandler({}))
     with no_proxy_opener.open(req, timeout=SERVICE_QUERY_TIMEOUT_SEC) as resp:
         if resp.status != 200:
-            raise RuntimeError(f"query model list failed, status={resp.status}")
+            raise RuntimeError(f"query model list failed at {url}, status={resp.status}")
         body = resp.read().decode("utf-8")
     payload = json.loads(body)
     model_data = payload.get("data", [])
@@ -235,6 +236,7 @@ def query_available_models(ip_address, port):
     return sorted(set(models))
 
 def wait_service_and_check_model(config_model_name):
+    """Poll service model list every 5s, then return the runtime model name to use."""
     while True:
         try:
             model_list = query_available_models(HOST_IP, HOST_PORT)
@@ -252,7 +254,7 @@ def wait_service_and_check_model(config_model_name):
                 available_model = model_list[0]
                 logging.warning(
                     f"configured MODEL_NAME '{config_model_name}' not found, "
-                    f"auto use available model '{available_model}'."
+                    f"automatically using available model '{available_model}'."
                 )
                 return available_model
             logging.error(
