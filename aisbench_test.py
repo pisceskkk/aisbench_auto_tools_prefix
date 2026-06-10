@@ -111,7 +111,9 @@ def save_result(request_rate, npu_num):
     save_log(aisbench_log_dir, log_dir)
     save_csv(ans, filename)
 
-def modify_aisbench_api(concurrency, output_len, model_name):
+def modify_aisbench_api(concurrency, output_len, model_name=None):
+    if model_name is None:
+        model_name = MODEL_NAME
     file_default = open("default_api.py", 'r+')
     file_temp = open("temp_api.py", 'w+')
     logging.info("Api config file:")
@@ -258,7 +260,7 @@ def wait_service_and_check_model(config_model_name):
                 "multiple models available and no exact match, exiting."
             )
             sys.exit(1)
-        except (error.URLError, TimeoutError, OSError) as ex:
+        except (error.URLError, OSError) as ex:
             logging.info(
                 f"service not ready at {HOST_IP}:{HOST_PORT}, retrying in {SERVICE_RETRY_INTERVAL_SEC}s. "
                 f"reason: {ex}"
