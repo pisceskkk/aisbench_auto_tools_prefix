@@ -218,12 +218,13 @@ def cal_prefix_hit_info(query_tokens, query_tokens_external, hit_tokens, hit_tok
         print("=" * total_width)
 
 def query_available_models(ip_address, port):
+    """Query /v1/models and return unique model ids; raises RuntimeError for non-200 response."""
     url = f"http://{ip_address}:{port}/v1/models"
     req = request.Request(url=url, method="GET")
     no_proxy_opener = request.build_opener(request.ProxyHandler({}))
     with no_proxy_opener.open(req, timeout=SERVICE_QUERY_TIMEOUT_SEC) as resp:
         if resp.status != 200:
-            raise RuntimeError(f"query model list failed at {url}, status={resp.status}")
+            raise RuntimeError(f"query model list failed at {url}, HTTP status code {resp.status}")
         body = resp.read().decode("utf-8")
     payload = json.loads(body)
     model_data = payload.get("data", [])
@@ -236,7 +237,7 @@ def query_available_models(ip_address, port):
     return sorted(set(models))
 
 def wait_service_and_check_model(config_model_name):
-    """Poll service model list every 5s, then return the runtime model name to use."""
+    """Infinitely poll service model list every 5s using config_model_name, return runtime model or sys.exit(1)."""
     while True:
         try:
             model_list = query_available_models(HOST_IP, HOST_PORT)
@@ -259,7 +260,8 @@ def wait_service_and_check_model(config_model_name):
                 return available_model
             logging.error(
                 f"configured MODEL_NAME '{config_model_name}' not found in available models {model_list}. "
-                "multiple models available and no exact match, exiting."
+                "Multiple models available and no exact match, exiting. "
+                "Please update MODEL_NAME in config to match one of the available models."
             )
             sys.exit(1)
         except (error.URLError, OSError) as ex:
