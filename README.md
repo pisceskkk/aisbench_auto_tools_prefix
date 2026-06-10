@@ -57,6 +57,8 @@ OUTPUT_DIR = "./outputs/default"
 POD_INFO = []
 ```
 
+**注：脚本在生成数据集后、发起测试前会每5秒轮询 `http://HOST_IP:HOST_PORT/v1/models` 检查服务状态并校验模型名。若仅查询到1个模型且与 `MODEL_NAME` 不一致，会自动覆盖为该模型并打印 warning；若查询到多个模型且都不匹配，则会 error 退出。**
+
 ## 二、参数详解
 
 `python3 aisbench_test.py --help`可查看所有参数

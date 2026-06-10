@@ -2,6 +2,9 @@ import os, errno
 import argparse
 import re
 import logging
+import json
+import time
+from urllib import request, error
 from config import *
 from generate_dataset import *
 from save_file import get_data, save_csv, save_log
@@ -207,6 +210,53 @@ def cal_prefix_hit_info(query_tokens, query_tokens_external, hit_tokens, hit_tok
         
         print("=" * total_width)
 
+def query_available_models(ip_address, port):
+    url = f"http://{ip_address}:{port}/v1/models"
+    req = request.Request(url=url, method="GET")
+    no_proxy_opener = request.build_opener(request.ProxyHandler({}))
+    with no_proxy_opener.open(req, timeout=10) as resp:
+        if resp.status != 200:
+            raise RuntimeError(f"query model list failed, status={resp.status}")
+        body = resp.read().decode("utf-8")
+    payload = json.loads(body)
+    model_data = payload.get("data", [])
+    models = []
+    for item in model_data:
+        if isinstance(item, dict):
+            model_name = item.get("id")
+            if model_name:
+                models.append(str(model_name))
+    return sorted(set(models))
+
+def wait_service_and_check_model():
+    global MODEL_NAME
+    while True:
+        try:
+            model_list = query_available_models(HOST_IP, HOST_PORT)
+            if not model_list:
+                logging.info(f"service is up but model list is empty, retry after 5s. ({HOST_IP}:{HOST_PORT})")
+                time.sleep(5)
+                continue
+            logging.info(f"available models from service: {model_list}")
+            if MODEL_NAME in model_list:
+                return
+            if len(model_list) == 1:
+                available_model = model_list[0]
+                logging.warning(
+                    f"configured MODEL_NAME '{MODEL_NAME}' not found, "
+                    f"auto use available model '{available_model}'."
+                )
+                MODEL_NAME = available_model
+                return
+            logging.error(
+                f"configured MODEL_NAME '{MODEL_NAME}' not found in available models {model_list}. "
+                "multiple models available and no exact match, exit."
+            )
+            exit(1)
+        except (error.URLError, TimeoutError, json.JSONDecodeError, RuntimeError, OSError) as ex:
+            logging.info(f"service not ready at {HOST_IP}:{HOST_PORT}, retry after 5s. reason: {ex}")
+            time.sleep(5)
+
 if __name__ == '__main__':
     args = parse_arguments()
     input_len = args.input_len
@@ -287,6 +337,8 @@ if __name__ == '__main__':
             exit(0)
         src_file_data = dataset_path_input
         src_file_prefix = ""
+
+    wait_service_and_check_model()
 
     dst_dir = os.path.join(WORK_PATH, "ais_bench/datasets/gsm8k")
 
