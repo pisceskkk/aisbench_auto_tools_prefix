@@ -14,9 +14,10 @@ logging.getLogger().setLevel(logging.INFO)
 
 SERVICE_QUERY_TIMEOUT_SEC = 10
 SERVICE_RETRY_INTERVAL_SEC = 5
-SPINNER_TICK_SEC = 0.1
+SPINNER_TICK_SEC = 0.25
 SPINNER_FRAMES = "|/-\\"
 SPINNER_LINE_WIDTH = 160
+FALLBACK_LOG_EVERY_ATTEMPTS = 6
 
 
 class WaitIndicator:
@@ -25,6 +26,7 @@ class WaitIndicator:
         self.enabled = hasattr(self.stream, "isatty") and self.stream.isatty()
         self.frame_index = 0
         self.last_fallback_status = None
+        self.last_fallback_attempt = 0
         self.active = False
 
     def _render(self, status_message, attempt, start_time):
@@ -39,10 +41,14 @@ class WaitIndicator:
     def show(self, status_message, attempt, start_time):
         if self.enabled:
             self._render(status_message, attempt, start_time)
-        elif status_message != self.last_fallback_status:
+        elif (
+            status_message != self.last_fallback_status
+            or attempt - self.last_fallback_attempt >= FALLBACK_LOG_EVERY_ATTEMPTS
+        ):
             elapsed_sec = int(time.time() - start_time)
             logging.info(f"{status_message} (attempt #{attempt}, elapsed {elapsed_sec}s)")
             self.last_fallback_status = status_message
+            self.last_fallback_attempt = attempt
 
     def clear(self):
         if self.enabled and self.active:
@@ -262,7 +268,11 @@ def cal_prefix_hit_info(query_tokens, query_tokens_external, hit_tokens, hit_tok
         print("=" * total_width)
 
 def query_available_models(ip_address, port):
-    """Query /v1/models and return unique model ids; raises RuntimeError for non-200 response."""
+    """Query /v1/models and return unique model ids.
+
+    Raises RuntimeError for non-200 responses and may propagate URLError, OSError,
+    or JSONDecodeError when the service cannot be reached or returns invalid JSON.
+    """
     url = f"http://{ip_address}:{port}/v1/models"
     req = request.Request(url=url, method="GET")
     no_proxy_opener = request.build_opener(request.ProxyHandler({}))
@@ -281,7 +291,12 @@ def query_available_models(ip_address, port):
     return sorted(set(models))
 
 def wait_service_and_check_model(config_model_name):
-    """Continuously poll the service model list and return the runtime model or sys.exit(1)."""
+    """Continuously poll the service model list and resolve the runtime model name.
+
+    Return config_model_name when it is available. If exactly one different model is
+    returned, use it with a warning. Exit when multiple available models do not match
+    the configured model name.
+    """
     indicator = WaitIndicator()
     start_time = time.time()
     attempt = 0
