@@ -4,6 +4,7 @@ import re
 import logging
 import json
 import time
+import sys
 from urllib import request, error
 from config import *
 from generate_dataset import *
@@ -107,13 +108,13 @@ def save_result(request_rate, npu_num):
     save_log(aisbench_log_dir, log_dir)
     save_csv(ans, filename)
 
-def modify_aisbench_api(concurrency, output_len):
+def modify_aisbench_api(concurrency, output_len, model_name):
     file_default = open("default_api.py", 'r+')
     file_temp = open("temp_api.py", 'w+')
     logging.info("Api config file:")
     for ss in file_default.readlines():
         tt = re.sub("model_path_for_replace", MODEL_PATH, ss)
-        tt = re.sub("model_name_for_replace", MODEL_NAME, tt)
+        tt = re.sub("model_name_for_replace", model_name, tt)
         tt = re.sub("rr_for_replace", request_rate, tt)
         tt = re.sub("test_type_for_replace", api_test_type, tt)
         tt = re.sub("test_abbr_for_replace", api_test_abbr, tt)
@@ -228,8 +229,7 @@ def query_available_models(ip_address, port):
                 models.append(str(model_name))
     return sorted(set(models))
 
-def wait_service_and_check_model():
-    global MODEL_NAME
+def wait_service_and_check_model(config_model_name):
     while True:
         try:
             model_list = query_available_models(HOST_IP, HOST_PORT)
@@ -238,23 +238,25 @@ def wait_service_and_check_model():
                 time.sleep(5)
                 continue
             logging.info(f"available models from service: {model_list}")
-            if MODEL_NAME in model_list:
-                return
+            if config_model_name in model_list:
+                return config_model_name
             if len(model_list) == 1:
                 available_model = model_list[0]
                 logging.warning(
-                    f"configured MODEL_NAME '{MODEL_NAME}' not found, "
+                    f"configured MODEL_NAME '{config_model_name}' not found, "
                     f"auto use available model '{available_model}'."
                 )
-                MODEL_NAME = available_model
-                return
+                return available_model
             logging.error(
-                f"configured MODEL_NAME '{MODEL_NAME}' not found in available models {model_list}. "
+                f"configured MODEL_NAME '{config_model_name}' not found in available models {model_list}. "
                 "multiple models available and no exact match, exit."
             )
-            exit(1)
-        except (error.URLError, TimeoutError, json.JSONDecodeError, RuntimeError, OSError) as ex:
+            sys.exit(1)
+        except (error.URLError, TimeoutError, OSError) as ex:
             logging.info(f"service not ready at {HOST_IP}:{HOST_PORT}, retry after 5s. reason: {ex}")
+            time.sleep(5)
+        except (json.JSONDecodeError, RuntimeError) as ex:
+            logging.info(f"service response invalid at {HOST_IP}:{HOST_PORT}, retry after 5s. reason: {ex}")
             time.sleep(5)
 
 if __name__ == '__main__':
@@ -338,7 +340,7 @@ if __name__ == '__main__':
         src_file_data = dataset_path_input
         src_file_prefix = ""
 
-    wait_service_and_check_model()
+    runtime_model_name = wait_service_and_check_model(MODEL_NAME)
 
     dst_dir = os.path.join(WORK_PATH, "ais_bench/datasets/gsm8k")
 
@@ -370,7 +372,7 @@ if __name__ == '__main__':
             logging.info(f"pod_info: {pod_info}")
             
             logging.info(f"[开始] 前缀数据集测试")
-            modify_aisbench_api(str(dp),"1")
+            modify_aisbench_api(str(dp), "1", runtime_model_name)
             dst_file = generate_test_dataset(src_file_prefix, dst_dir)
 
             # 命中率计算
@@ -389,7 +391,7 @@ if __name__ == '__main__':
             # 命中率计算
             query_tokens, query_tokens_external, hit_tokens, hit_tokens_external = get_pod_metrics_info(pod_info)
             
-            modify_aisbench_api(concurrency,str(output_len))
+            modify_aisbench_api(concurrency, str(output_len), runtime_model_name)
             dst_file = generate_test_dataset(src_file_data, dst_dir)
             # 执行测试命令
             os. system(ais_bench_cmd)
@@ -401,14 +403,14 @@ if __name__ == '__main__':
             
         else:
             logging.info(f"[开始] 全量数据集测试")
-            modify_aisbench_api(concurrency,str(output_len))
+            modify_aisbench_api(concurrency, str(output_len), runtime_model_name)
             dst_file = generate_test_dataset(src_file_data, dst_dir)
             os. system(ais_bench_cmd)
             logging.info(f"[完成] 全量数据集测试完成")
 
     else:
         logging.info(f"[开始] 全量数据集测试")
-        modify_aisbench_api(concurrency,str(output_len))
+        modify_aisbench_api(concurrency, str(output_len), runtime_model_name)
         dst_file = generate_test_dataset(src_file_data, dst_dir)
         if test_times > 1:
             for test_time in range(test_times):
