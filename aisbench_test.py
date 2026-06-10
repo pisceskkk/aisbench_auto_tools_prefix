@@ -12,6 +12,9 @@ from save_file import get_data, save_csv, save_log
 from cal_prefix_hit_rate import *
 logging.getLogger().setLevel(logging.INFO)
 
+SERVICE_QUERY_TIMEOUT_SEC = 10
+SERVICE_RETRY_INTERVAL_SEC = 5
+
 
 def parse_arguments():
     parser = argparse.ArgumentParser()
@@ -215,7 +218,7 @@ def query_available_models(ip_address, port):
     url = f"http://{ip_address}:{port}/v1/models"
     req = request.Request(url=url, method="GET")
     no_proxy_opener = request.build_opener(request.ProxyHandler({}))
-    with no_proxy_opener.open(req, timeout=10) as resp:
+    with no_proxy_opener.open(req, timeout=SERVICE_QUERY_TIMEOUT_SEC) as resp:
         if resp.status != 200:
             raise RuntimeError(f"query model list failed, status={resp.status}")
         body = resp.read().decode("utf-8")
@@ -234,8 +237,11 @@ def wait_service_and_check_model(config_model_name):
         try:
             model_list = query_available_models(HOST_IP, HOST_PORT)
             if not model_list:
-                logging.info(f"service is up but model list is empty, retry after 5s. ({HOST_IP}:{HOST_PORT})")
-                time.sleep(5)
+                logging.info(
+                    f"service is up but model list is empty, retrying in {SERVICE_RETRY_INTERVAL_SEC}s. "
+                    f"({HOST_IP}:{HOST_PORT})"
+                )
+                time.sleep(SERVICE_RETRY_INTERVAL_SEC)
                 continue
             logging.info(f"available models from service: {model_list}")
             if config_model_name in model_list:
@@ -249,15 +255,21 @@ def wait_service_and_check_model(config_model_name):
                 return available_model
             logging.error(
                 f"configured MODEL_NAME '{config_model_name}' not found in available models {model_list}. "
-                "multiple models available and no exact match, exit."
+                "multiple models available and no exact match, exiting."
             )
             sys.exit(1)
         except (error.URLError, TimeoutError, OSError) as ex:
-            logging.info(f"service not ready at {HOST_IP}:{HOST_PORT}, retry after 5s. reason: {ex}")
-            time.sleep(5)
+            logging.info(
+                f"service not ready at {HOST_IP}:{HOST_PORT}, retrying in {SERVICE_RETRY_INTERVAL_SEC}s. "
+                f"reason: {ex}"
+            )
+            time.sleep(SERVICE_RETRY_INTERVAL_SEC)
         except (json.JSONDecodeError, RuntimeError) as ex:
-            logging.info(f"service response invalid at {HOST_IP}:{HOST_PORT}, retry after 5s. reason: {ex}")
-            time.sleep(5)
+            logging.info(
+                f"service response invalid at {HOST_IP}:{HOST_PORT}, retrying in {SERVICE_RETRY_INTERVAL_SEC}s. "
+                f"reason: {ex}"
+            )
+            time.sleep(SERVICE_RETRY_INTERVAL_SEC)
 
 if __name__ == '__main__':
     args = parse_arguments()
