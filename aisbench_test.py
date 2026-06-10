@@ -16,6 +16,7 @@ SERVICE_QUERY_TIMEOUT_SEC = 10
 SERVICE_RETRY_INTERVAL_SEC = 5
 SPINNER_TICK_SEC = 0.1
 SPINNER_FRAMES = "|/-\\"
+SPINNER_LINE_WIDTH = 160
 
 
 class WaitIndicator:
@@ -30,7 +31,7 @@ class WaitIndicator:
         elapsed_sec = int(time.time() - start_time)
         frame = SPINNER_FRAMES[self.frame_index % len(SPINNER_FRAMES)]
         message = f"\r[{frame}] {status_message} | attempt #{attempt} | elapsed {elapsed_sec}s"
-        self.stream.write(message.ljust(160))
+        self.stream.write(message.ljust(SPINNER_LINE_WIDTH))
         self.stream.flush()
         self.frame_index += 1
         self.active = True
@@ -45,7 +46,7 @@ class WaitIndicator:
 
     def clear(self):
         if self.enabled and self.active:
-            self.stream.write("\r" + (" " * 160) + "\r")
+            self.stream.write("\r" + (" " * SPINNER_LINE_WIDTH) + "\r")
             self.stream.flush()
             self.active = False
 
@@ -280,7 +281,7 @@ def query_available_models(ip_address, port):
     return sorted(set(models))
 
 def wait_service_and_check_model(config_model_name):
-    """Infinitely poll service model list every 5s using config_model_name, return runtime model or sys.exit(1)."""
+    """Continuously poll the service model list and return the runtime model or sys.exit(1)."""
     indicator = WaitIndicator()
     start_time = time.time()
     attempt = 0
