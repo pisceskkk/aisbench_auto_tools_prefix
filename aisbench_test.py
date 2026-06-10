@@ -14,6 +14,49 @@ logging.getLogger().setLevel(logging.INFO)
 
 SERVICE_QUERY_TIMEOUT_SEC = 10
 SERVICE_RETRY_INTERVAL_SEC = 5
+SPINNER_TICK_SEC = 0.1
+SPINNER_FRAMES = "|/-\\"
+
+
+class WaitIndicator:
+    def __init__(self):
+        self.stream = sys.stderr
+        self.enabled = hasattr(self.stream, "isatty") and self.stream.isatty()
+        self.frame_index = 0
+        self.last_fallback_status = None
+        self.active = False
+
+    def _render(self, status_message, attempt, start_time):
+        elapsed_sec = int(time.time() - start_time)
+        frame = SPINNER_FRAMES[self.frame_index % len(SPINNER_FRAMES)]
+        message = f"\r[{frame}] {status_message} | attempt #{attempt} | elapsed {elapsed_sec}s"
+        self.stream.write(message.ljust(160))
+        self.stream.flush()
+        self.frame_index += 1
+        self.active = True
+
+    def show(self, status_message, attempt, start_time):
+        if self.enabled:
+            self._render(status_message, attempt, start_time)
+        elif status_message != self.last_fallback_status:
+            elapsed_sec = int(time.time() - start_time)
+            logging.info(f"{status_message} (attempt #{attempt}, elapsed {elapsed_sec}s)")
+            self.last_fallback_status = status_message
+
+    def clear(self):
+        if self.enabled and self.active:
+            self.stream.write("\r" + (" " * 160) + "\r")
+            self.stream.flush()
+            self.active = False
+
+    def sleep(self, status_message, attempt, start_time, wait_seconds):
+        end_time = time.time() + wait_seconds
+        while True:
+            self.show(status_message, attempt, start_time)
+            remaining = end_time - time.time()
+            if remaining <= 0:
+                break
+            time.sleep(min(SPINNER_TICK_SEC, remaining))
 
 
 def parse_arguments():
@@ -238,16 +281,22 @@ def query_available_models(ip_address, port):
 
 def wait_service_and_check_model(config_model_name):
     """Infinitely poll service model list every 5s using config_model_name, return runtime model or sys.exit(1)."""
+    indicator = WaitIndicator()
+    start_time = time.time()
+    attempt = 0
     while True:
+        attempt += 1
         try:
             model_list = query_available_models(HOST_IP, HOST_PORT)
             if not model_list:
-                logging.info(
-                    f"service is up but model list is empty, retrying in {SERVICE_RETRY_INTERVAL_SEC}s. "
-                    f"({HOST_IP}:{HOST_PORT})"
+                indicator.sleep(
+                    f"service is up but model list is empty, waiting for models from {HOST_IP}:{HOST_PORT}",
+                    attempt,
+                    start_time,
+                    SERVICE_RETRY_INTERVAL_SEC
                 )
-                time.sleep(SERVICE_RETRY_INTERVAL_SEC)
                 continue
+            indicator.clear()
             logging.info(f"available models from service: {model_list}")
             if config_model_name in model_list:
                 return config_model_name
@@ -258,6 +307,7 @@ def wait_service_and_check_model(config_model_name):
                     f"automatically using available model '{available_model}'."
                 )
                 return available_model
+            indicator.clear()
             logging.error(
                 f"configured MODEL_NAME '{config_model_name}' not found in available models {model_list}. "
                 "Multiple models available and no exact match, exiting. "
@@ -265,17 +315,19 @@ def wait_service_and_check_model(config_model_name):
             )
             sys.exit(1)
         except (error.URLError, OSError) as ex:
-            logging.info(
-                f"service not ready at {HOST_IP}:{HOST_PORT}, retrying in {SERVICE_RETRY_INTERVAL_SEC}s. "
-                f"reason: {ex}"
+            indicator.sleep(
+                f"service not ready at {HOST_IP}:{HOST_PORT}, waiting to retry, reason: {ex}",
+                attempt,
+                start_time,
+                SERVICE_RETRY_INTERVAL_SEC
             )
-            time.sleep(SERVICE_RETRY_INTERVAL_SEC)
         except (json.JSONDecodeError, RuntimeError) as ex:
-            logging.info(
-                f"service response invalid at {HOST_IP}:{HOST_PORT}, retrying in {SERVICE_RETRY_INTERVAL_SEC}s. "
-                f"reason: {ex}"
+            indicator.sleep(
+                f"service response invalid at {HOST_IP}:{HOST_PORT}, waiting to retry, reason: {ex}",
+                attempt,
+                start_time,
+                SERVICE_RETRY_INTERVAL_SEC
             )
-            time.sleep(SERVICE_RETRY_INTERVAL_SEC)
 
 if __name__ == '__main__':
     args = parse_arguments()
